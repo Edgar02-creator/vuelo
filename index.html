@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Sky Guardian Web (Táctil)</title>
+    <title>Sky Guardian Web (Gamepad)</title>
     <style>
         body { 
             margin: 0; 
@@ -17,14 +17,18 @@
             color: white;
             width: 100vw;
             height: 100vh;
-            /* Evitar el "pull-to-refresh" en algunos navegadores móviles */
             overscroll-behavior-y: contain; 
+            -webkit-touch-callout: none; /* iOS Safari */
+            -webkit-user-select: none;   /* Safari */
+            -khtml-user-select: none;    /* Konqueror HTML */
+            -moz-user-select: none;      /* Old versions of Firefox */
+            -ms-user-select: none;       /* Internet Explorer/Edge */
+            user-select: none;           /* Non-prefixed version, currently supported by Chrome, Edge, Opera and Firefox */
         }
         canvas { 
             background-color: #000; 
             border: 2px solid #555; 
             display: none; 
-            /* Para que el canvas se adapte mejor a la pantalla del móvil */
             max-width: 100%;
             max-height: 100%;
         }
@@ -83,17 +87,52 @@
             transform: scale(1.1); 
         }
 
-        /* Área de control táctil (visible solo en el juego) */
-        #touchControlArea {
+        /* Controles de Gamepad Virtual */
+        #gamepadControls {
             position: absolute;
             left: 0;
-            top: 0;
-            width: 50%; /* Ocupa la mitad izquierda de la pantalla */
-            height: 100%;
+            bottom: 0;
+            width: 50%; /* Ocupa la mitad izquierda de la pantalla en la parte inferior */
+            height: 100%; /* Ahora ocupará todo el alto */
+            display: grid;
+            grid-template-columns: repeat(3, 1fr); /* 3 columnas */
+            grid-template-rows: repeat(3, 1fr);    /* 3 filas */
+            gap: 5px; /* Espacio entre botones */
+            padding: 10px;
+            box-sizing: border-box;
             z-index: 50; /* Por encima del canvas, debajo de los popups */
-            /* Quitar el fondo para que no interfiera visualmente */
-            /* background-color: rgba(0, 0, 255, 0.1); */ /* Solo para depuración */
+            /* background-color: rgba(255, 0, 0, 0.1); / / Solo para depuración */
             display: none; /* Oculto por defecto */
+        }
+        .control-button {
+            background-color: rgba(50, 50, 50, 0.7); /* Gris oscuro semi-transparente */
+            border: 2px solid #0f0;
+            border-radius: 8px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 2em; /* Tamaño de las flechas */
+            color: #0f0;
+            cursor: pointer;
+            user-select: none; /* Evita selección de texto */
+            -webkit-tap-highlight-color: transparent; /* Evita el resalte táctil en móviles */
+            touch-action: manipulation; /* Ayuda a prevenir comportamientos no deseados en táctil */
+        }
+        .control-button:active { /* Efecto al presionar */
+            background-color: rgba(0, 255, 0, 0.3);
+            box-shadow: 0 0 10px #0f0;
+        }
+        /* Posiciones específicas en el grid */
+        #upButton { grid-area: 1 / 2 / 2 / 3; } /* Fila 1, Columna 2 */
+        #leftButton { grid-area: 2 / 1 / 3 / 2; } /* Fila 2, Columna 1 */
+        #rightButton { grid-area: 2 / 3 / 3 / 4; } /* Fila 2, Columna 3 */
+        #downButton { grid-area: 3 / 2 / 4 / 3; } /* Fila 3, Columna 2 */
+
+        /* Para el control de teclado, solo para la depuración en PC */
+        @media (min-width: 768px) { /* Asumimos que más de 768px es desktop */
+            #gamepadControls {
+                display: none !important; /* Oculta los controles virtuales en desktop */
+            }
         }
     </style>
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
@@ -111,7 +150,12 @@
 
     <canvas id="gameCanvas" width="800" height="600"></canvas>
     
-    <div id="touchControlArea"></div>
+    <div id="gamepadControls">
+        <div class="control-button" id="upButton">⬆️</div>
+        <div class="control-button" id="leftButton">⬅️</div>
+        <div class="control-button" id="rightButton">➡️</div>
+        <div class="control-button" id="downButton">⬇️</div>
+    </div>
 
     <div id="game-over-screen" style="display: none;">
         <h2>¡GAME OVER!</h2>
@@ -138,7 +182,13 @@
         const nuevoJugadorButton = document.getElementById('nuevoJugadorButton');
         const salirButton = document.getElementById('salirButton');
         const downloadIcon = document.getElementById('downloadIcon'); 
-        const touchControlArea = document.getElementById('touchControlArea'); // Nuevo: el área de control táctil
+        const gamepadControls = document.getElementById('gamepadControls'); // Nuevo: Contenedor del gamepad
+
+        // Botones del gamepad
+        const upButton = document.getElementById('upButton');
+        const leftButton = document.getElementById('leftButton');
+        const rightButton = document.getElementById('rightButton');
+        const downButton = document.getElementById('downButton');
 
         let player;
         let playerImage = new Image();
@@ -167,10 +217,13 @@
         const OBSTACLE_SPEED_MAX = 6;
         const OBSTACLE_SPAWN_RATE = 800; 
 
-        // Variables para control táctil
-        let touchStartX = 0;
-        let touchStartY = 0;
-        let touchActive = false; // Indica si hay un toque activo
+        // Estado de los botones del gamepad
+        let buttonsPressed = {
+            'up': false,
+            'down': false,
+            'left': false,
+            'right': false
+        };
 
         // --- Clase del Jugador (con imagen) ---
         class Player {
@@ -190,12 +243,18 @@
                 }
             }
 
-            // `newX` y `newY` son las coordenadas absolutas a las que se moverá el jugador
-            update(newX, newY) {
-                // Mueve el jugador directamente a las coordenadas del toque,
-                // pero lo centra en el dedo.
-                this.x = newX - this.width / 2;
-                this.y = newY - this.height / 2;
+            update() {
+                let dx = 0;
+                let dy = 0;
+
+                // Mueve basado en los botones presionados
+                if (buttonsPressed.left) dx = -PLAYER_SPEED;
+                if (buttonsPressed.right) dx = PLAYER_SPEED;
+                if (buttonsPressed.up) dy = -PLAYER_SPEED;
+                if (buttonsPressed.down) dy = PLAYER_SPEED;
+
+                this.x += dx;
+                this.y += dy;
 
                 // Limitar movimiento dentro del canvas
                 if (this.x < 0) this.x = 0;
@@ -267,10 +326,10 @@
             }
 
             let csvContent = "Fecha/Hora,Nombre,Telefono,Puntaje\n";
-            const escapeCsv = (data) => `"${String(data).replace(/"/g, '""')}"`;
+            const escapeCsv = (data) => "${String(data).replace(/"/g, '""')}";
 
             allPlayerRecords.forEach(record => {
-                csvContent += `${escapeCsv(record.timestamp)},${escapeCsv(record.name)},${escapeCsv(record.phone)},${escapeCsv(record.score)}\n`;
+                csvContent += ${escapeCsv(record.timestamp)},${escapeCsv(record.name)},${escapeCsv(record.phone)},${escapeCsv(record.score)}\n;
             });
 
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -295,8 +354,8 @@
         function startGame() {
             inicioScreen.style.display = 'none';
             gameOverScreen.style.display = 'none';
-            canvas.style.display = 'block'; // Mostrar el canvas del juego
-            touchControlArea.style.display = 'block'; // Mostrar el área de control táctil
+            canvas.style.display = 'block'; 
+            gamepadControls.style.display = 'grid'; // Mostrar los controles del gamepad
 
             player = new Player();
             obstacles = [];
@@ -326,10 +385,10 @@
             saveScore(currentPlayer.name, Math.floor(score / 60)); 
             addPlayerRecord(currentPlayer.name, currentPlayer.phone, Math.floor(score / 60));
 
-            finalScoreDisplay.textContent = `Puntuación Final: ${Math.floor(score / 60)} segundos`;
+            finalScoreDisplay.textContent = Puntuación Final: ${Math.floor(score / 60)} segundos;
             gameOverScreen.style.display = 'block';
-            canvas.style.display = 'none'; // Ocultar el canvas del juego
-            touchControlArea.style.display = 'none'; // Ocultar el área de control táctil
+            canvas.style.display = 'none'; 
+            gamepadControls.style.display = 'none'; // Ocultar los controles del gamepad
         }
 
         function gameLoop() {
@@ -337,6 +396,7 @@
 
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+            player.update(); // El jugador se actualiza a sí mismo según los botones presionados
             player.draw();
 
             for (let i = 0; i < obstacles.length; i++) {
@@ -357,62 +417,83 @@
 
             ctx.fillStyle = 'white';
             ctx.font = '24px "Press Start 2P", Arial';
-            ctx.fillText(`Puntos: ${Math.floor(score / 60)}`, 10, 30);
+            ctx.fillText(Puntos: ${Math.floor(score / 60)}, 10, 30);
         }
 
-        // --- Control Táctil (Eventos) ---
-
-        // Función para obtener las coordenadas del toque en relación al canvas
-        function getTouchPos(canvasDom, touchEvent) {
-            const rect = canvasDom.getBoundingClientRect(); // Obtiene el tamaño y posición del canvas
-            return {
-                x: (touchEvent.touches[0].clientX - rect.left) / (rect.right - rect.left) * canvas.width,
-                y: (touchEvent.touches[0].clientY - rect.top) / (rect.bottom - rect.top) * canvas.height
-            };
-        }
-
-        touchControlArea.addEventListener('touchstart', (e) => {
-            e.preventDefault(); // Previene el scroll/zoom del navegador
-            if (gameRunning && e.touches.length > 0) {
-                touchActive = true;
-                const touchPos = getTouchPos(canvas, e);
-                player.update(touchPos.x, touchPos.y); // Mueve el jugador a la posición inicial del toque
-            }
-        }, { passive: false }); // Usar { passive: false } para que preventDefault funcione
-
-        touchControlArea.addEventListener('touchmove', (e) => {
-            e.preventDefault(); // Previene el scroll/zoom del navegador
-            if (gameRunning && touchActive && e.touches.length > 0) {
-                const touchPos = getTouchPos(canvas, e);
-                player.update(touchPos.x, touchPos.y); // Sigue el movimiento del dedo
-            }
-        }, { passive: false });
-
-        touchControlArea.addEventListener('touchend', (e) => {
-            e.preventDefault(); // Previene comportamientos por defecto al soltar
-            touchActive = false;
-        }, { passive: false });
-
-        // --- Manejo del teclado (para desarrollo en PC, no debería interferir en móvil) ---
-        let keysPressed = {};
+        // --- Control de Teclado (solo para desarrollo en PC) ---
+        // Todavía se incluye para que puedas probar con el teclado en PC si lo deseas
         window.addEventListener('keydown', (e) => {
-            keysPressed[e.key] = true;
-            if (gameRunning && !touchActive) { // Solo si el juego corre y no hay un toque activo
-                let dx = 0;
-                let dy = 0;
-                if (keysPressed['ArrowLeft']) dx = -PLAYER_SPEED;
-                if (keysPressed['ArrowRight']) dx = PLAYER_SPEED;
-                if (keysPressed['ArrowUp']) dy = -PLAYER_SPEED;
-                if (keysPressed['ArrowDown']) dy = PLAYER_SPEED;
-                // Si el jugador se mueve con teclado, calculamos la nueva posición X, Y
-                player.update(player.x + dx, player.y + dy); 
+            if (gameRunning) {
+                switch (e.key) {
+                    case 'ArrowUp': buttonsPressed.up = true; break;
+                    case 'ArrowDown': buttonsPressed.down = true; break;
+                    case 'ArrowLeft': buttonsPressed.left = true; break;
+                    case 'ArrowRight': buttonsPressed.right = true; break;
+                }
             }
         });
         window.addEventListener('keyup', (e) => {
-            keysPressed[e.key] = false;
+            if (gameRunning) {
+                switch (e.key) {
+                    case 'ArrowUp': buttonsPressed.up = false; break;
+                    case 'ArrowDown': buttonsPressed.down = false; break;
+                    case 'ArrowLeft': buttonsPressed.left = false; break;
+                    case 'ArrowRight': buttonsPressed.right = false; break;
+                }
+            }
         });
 
-        // --- Eventos de Botones y Formulario ---
+        // --- Control Táctil (para los botones del Gamepad Virtual) ---
+        // Función para manejar el inicio del toque/clic en un botón de control
+        function handleButtonStart(direction) {
+            if (gameRunning) {
+                buttonsPressed[direction] = true;
+            }
+        }
+
+        // Función para manejar el fin del toque/clic en un botón de control
+        function handleButtonEnd(direction) {
+            if (gameRunning) {
+                buttonsPressed[direction] = false;
+            }
+        }
+
+        // Asignar eventos a cada botón del gamepad
+        upButton.addEventListener('touchstart', (e) => { e.preventDefault(); handleButtonStart('up'); }, { passive: false });
+        upButton.addEventListener('touchend', (e) => { e.preventDefault(); handleButtonEnd('up'); }, { passive: false });
+        upButton.addEventListener('touchcancel', (e) => { e.preventDefault(); handleButtonEnd('up'); }, { passive: false }); // Por si el toque se interrumpe
+
+        downButton.addEventListener('touchstart', (e) => { e.preventDefault(); handleButtonStart('down'); }, { passive: false });
+        downButton.addEventListener('touchend', (e) => { e.preventDefault(); handleButtonEnd('down'); }, { passive: false });
+        downButton.addEventListener('touchcancel', (e) => { e.preventDefault(); handleButtonEnd('down'); }, { passive: false });
+
+        leftButton.addEventListener('touchstart', (e) => { e.preventDefault(); handleButtonStart('left'); }, { passive: false });
+        leftButton.addEventListener('touchend', (e) => { e.preventDefault(); handleButtonEnd('left'); }, { passive: false });
+        leftButton.addEventListener('touchcancel', (e) => { e.preventDefault(); handleButtonEnd('left'); }, { passive: false });
+
+        rightButton.addEventListener('touchstart', (e) => { e.preventDefault(); handleButtonStart('right'); }, { passive: false });
+        rightButton.addEventListener('touchend', (e) => { e.preventDefault(); handleButtonEnd('right'); }, { passive: false });
+        rightButton.addEventListener('touchcancel', (e) => { e.preventDefault(); handleButtonEnd('right'); }, { passive: false });
+
+        // También añadir eventos de mouse para que funcionen en PC haciendo click
+        upButton.addEventListener('mousedown', () => handleButtonStart('up'));
+        upButton.addEventListener('mouseup', () => handleButtonEnd('up'));
+        upButton.addEventListener('mouseleave', () => handleButtonEnd('up')); // Si el mouse sale del botón mientras está presionado
+
+        downButton.addEventListener('mousedown', () => handleButtonStart('down'));
+        downButton.addEventListener('mouseup', () => handleButtonEnd('down'));
+        downButton.addEventListener('mouseleave', () => handleButtonEnd('down'));
+
+        leftButton.addEventListener('mousedown', () => handleButtonStart('left'));
+        leftButton.addEventListener('mouseup', () => handleButtonEnd('left'));
+        leftButton.addEventListener('mouseleave', () => handleButtonEnd('left'));
+
+        rightButton.addEventListener('mousedown', () => handleButtonStart('right'));
+        rightButton.addEventListener('mouseup', () => handleButtonEnd('right'));
+        rightButton.addEventListener('mouseleave', () => handleButtonEnd('right'));
+
+
+        // --- Eventos de Botones de Pantalla ---
         playerForm.addEventListener('submit', (event) => {
             event.preventDefault(); 
 
@@ -453,7 +534,7 @@
                 canvas.style.display = 'none';
                 gameOverScreen.style.display = 'none';
                 inicioScreen.style.display = 'block'; 
-                touchControlArea.style.display = 'none'; // Asegurarse de que esté oculto al inicio
+                gamepadControls.style.display = 'none'; // Asegurarse de que esté oculto al inicio
             }
         }
 
