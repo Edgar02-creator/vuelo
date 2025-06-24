@@ -2,8 +2,8 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sky Guardian Web</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Sky Guardian Web (Táctil)</title>
     <style>
         body { 
             margin: 0; 
@@ -13,15 +13,20 @@
             justify-content: center; 
             align-items: center; 
             height: 100vh; 
-            font-family: 'Press Start 2P', cursive; /* Fuente para estilo "pixel art" */
+            font-family: 'Press Start 2P', cursive;
             color: white;
-            width: 100vw; /* Asegura que el body ocupe todo el ancho del viewport */
-            height: 100vh; /* Asegura que el body ocupe todo el alto del viewport */
+            width: 100vw;
+            height: 100vh;
+            /* Evitar el "pull-to-refresh" en algunos navegadores móviles */
+            overscroll-behavior-y: contain; 
         }
         canvas { 
             background-color: #000; 
             border: 2px solid #555; 
-            display: none; /* Oculto por defecto, se mostrará al iniciar el juego */
+            display: none; 
+            /* Para que el canvas se adapte mejor a la pantalla del móvil */
+            max-width: 100%;
+            max-height: 100%;
         }
         #inicio-screen, #game-over-screen {
             position: absolute;
@@ -34,7 +39,6 @@
             width: 80%;
             max-width: 500px;
             box-shadow: 0 0 15px rgba(0,255,0,0.5);
-            /* Centrado absoluto */
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
@@ -44,7 +48,7 @@
             margin: 10px 0;
             border: 2px solid #0f0;
             border-radius: 5px;
-            width: calc(100% - 24px); /* Ancho completo menos padding y borde */
+            width: calc(100% - 24px); 
             background-color: #222;
             color: #0f0;
             font-size: 1em;
@@ -52,7 +56,7 @@
         }
         button {
             padding: 10px 20px;
-            background-color: #008000; /* Verde oscuro */
+            background-color: #008000;
             color: white;
             border: none;
             border-radius: 5px;
@@ -62,21 +66,34 @@
             transition: background-color 0.3s ease;
         }
         button:hover {
-            background-color: #005f00; /* Verde más oscuro al pasar el ratón */
+            background-color: #005f00;
         }
         #downloadIcon {
-            position: fixed; /* Permanece en la misma posición al hacer scroll */
+            position: fixed; 
             bottom: 20px;
             right: 20px;
-            font-size: 30px; /* Tamaño del icono */
+            font-size: 30px; 
             cursor: pointer;
-            z-index: 100; /* Asegura que esté por encima de todo */
-            filter: drop-shadow(0 0 5px rgba(0,255,0,0.7)); /* Sombra para que destaque */
+            z-index: 100; 
+            filter: drop-shadow(0 0 5px rgba(0,255,0,0.7)); 
             transition: transform 0.2s ease-in-out;
-            color: #fff; /* Color del emoji */
+            color: #fff; 
         }
         #downloadIcon:hover {
-            transform: scale(1.1); /* Efecto al pasar el ratón */
+            transform: scale(1.1); 
+        }
+
+        /* Área de control táctil (visible solo en el juego) */
+        #touchControlArea {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 50%; /* Ocupa la mitad izquierda de la pantalla */
+            height: 100%;
+            z-index: 50; /* Por encima del canvas, debajo de los popups */
+            /* Quitar el fondo para que no interfiera visualmente */
+            /* background-color: rgba(0, 0, 255, 0.1); */ /* Solo para depuración */
+            display: none; /* Oculto por defecto */
         }
     </style>
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
@@ -93,6 +110,8 @@
     </div>
 
     <canvas id="gameCanvas" width="800" height="600"></canvas>
+    
+    <div id="touchControlArea"></div>
 
     <div id="game-over-screen" style="display: none;">
         <h2>¡GAME OVER!</h2>
@@ -119,6 +138,7 @@
         const nuevoJugadorButton = document.getElementById('nuevoJugadorButton');
         const salirButton = document.getElementById('salirButton');
         const downloadIcon = document.getElementById('downloadIcon'); 
+        const touchControlArea = document.getElementById('touchControlArea'); // Nuevo: el área de control táctil
 
         let player;
         let playerImage = new Image();
@@ -136,7 +156,6 @@
         let gameInterval;
         let obstacleSpawnInterval;
         let gameRunning = false;
-        // allPlayerRecords almacena TODOS los registros para la descarga
         let allPlayerRecords = JSON.parse(localStorage.getItem('allPlayerRecords')) || []; 
         let currentPlayer = { name: '', phone: '' }; 
 
@@ -148,6 +167,11 @@
         const OBSTACLE_SPEED_MAX = 6;
         const OBSTACLE_SPAWN_RATE = 800; 
 
+        // Variables para control táctil
+        let touchStartX = 0;
+        let touchStartY = 0;
+        let touchActive = false; // Indica si hay un toque activo
+
         // --- Clase del Jugador (con imagen) ---
         class Player {
             constructor() {
@@ -158,18 +182,20 @@
             }
 
             draw() {
-                // Solo dibuja si la imagen se cargó correctamente; de lo contrario, usa un color de fallback
                 if (playerImage.complete && playerImage.naturalWidth !== 0) {
                     ctx.drawImage(playerImage, this.x, this.y, this.width, this.height);
                 } else {
-                    ctx.fillStyle = 'red'; // Fallback a un cuadrado rojo
+                    ctx.fillStyle = 'red'; 
                     ctx.fillRect(this.x, this.y, this.width, this.height);
                 }
             }
 
-            update(dx, dy) {
-                this.x += dx;
-                this.y += dy;
+            // `newX` y `newY` son las coordenadas absolutas a las que se moverá el jugador
+            update(newX, newY) {
+                // Mueve el jugador directamente a las coordenadas del toque,
+                // pero lo centra en el dedo.
+                this.x = newX - this.width / 2;
+                this.y = newY - this.height / 2;
 
                 // Limitar movimiento dentro del canvas
                 if (this.x < 0) this.x = 0;
@@ -188,15 +214,14 @@
                 this.y = Math.random() * (canvas.height - this.height);
                 this.speed = Math.random() * (OBSTACLE_SPEED_MAX - OBSTACLE_SPEED_MIN) + OBSTACLE_SPEED_MIN;
 
-                // Asegúrate de que meteoriteImages no esté vacío antes de acceder a un índice
                 this.image = meteoriteImages.length > 0 ? meteoriteImages[Math.floor(Math.random() * meteoriteImages.length)] : null;
             }
 
             draw() {
-                if (this.image && this.image.complete && this.image.naturalWidth !== 0) { // Verifica si la imagen se cargó
+                if (this.image && this.image.complete && this.image.naturalWidth !== 0) {
                     ctx.drawImage(this.image, this.x, this.y, this.width, this.height);
                 } else {
-                    ctx.fillStyle = 'gray'; // Fallback a un cuadrado gris para el meteorito
+                    ctx.fillStyle = 'gray'; 
                     ctx.fillRect(this.x, this.y, this.width, this.height);
                 }
             }
@@ -215,7 +240,6 @@
         }
 
         // --- Funciones de Puntuación y Registro ---
-        // Se mantiene saveScore por si se quiere volver a usar el leaderboard en el futuro, aunque no se muestra.
         function saveScore(name, score) {
             let scores = JSON.parse(localStorage.getItem('skyGuardianScores')) || [];
             scores.push({ name: name, score: score, phone: currentPlayer.phone }); 
@@ -225,7 +249,7 @@
         }
 
         function addPlayerRecord(name, phone, score) {
-            const timestamp = new Date().toLocaleString(); // Formato de fecha y hora legible
+            const timestamp = new Date().toLocaleString(); 
             allPlayerRecords.push({
                 name: name,
                 phone: phone,
@@ -236,7 +260,6 @@
             console.log("Registro de jugador añadido:", { name, phone, score, timestamp });
         }
 
-        // Función para descargar los registros en formato CSV
         function downloadRecords() {
             if (allPlayerRecords.length === 0) {
                 alert('No hay registros de jugadores para descargar aún.');
@@ -261,7 +284,7 @@
                 document.body.appendChild(link);
                 link.click();
                 document.body.removeChild(link);
-                URL.revokeObjectURL(url); // Liberar la URL del objeto Blob
+                URL.revokeObjectURL(url);
             } else {
                 alert('Tu navegador no soporta la descarga directa de archivos. Por favor, copia el contenido manualmente desde la consola (Ctrl+Shift+I o F12).');
                 console.log(csvContent);
@@ -273,24 +296,23 @@
             inicioScreen.style.display = 'none';
             gameOverScreen.style.display = 'none';
             canvas.style.display = 'block'; // Mostrar el canvas del juego
+            touchControlArea.style.display = 'block'; // Mostrar el área de control táctil
 
             player = new Player();
             obstacles = [];
             score = 0;
             gameRunning = true;
 
-            // Generar algunos obstáculos iniciales
             for (let i = 0; i < 5; i++) {
                 obstacles.push(new Obstacle());
             }
 
-            // Limpiar y reiniciar intervalos
             clearInterval(gameInterval);
             clearInterval(obstacleSpawnInterval);
 
-            gameInterval = setInterval(gameLoop, 1000 / 60); // 60 FPS
+            gameInterval = setInterval(gameLoop, 1000 / 60); 
             obstacleSpawnInterval = setInterval(() => {
-                if (gameRunning) { // Solo genera si el juego sigue corriendo
+                if (gameRunning) { 
                     obstacles.push(new Obstacle());
                 }
             }, OBSTACLE_SPAWN_RATE);
@@ -307,6 +329,7 @@
             finalScoreDisplay.textContent = `Puntuación Final: ${Math.floor(score / 60)} segundos`;
             gameOverScreen.style.display = 'block';
             canvas.style.display = 'none'; // Ocultar el canvas del juego
+            touchControlArea.style.display = 'none'; // Ocultar el área de control táctil
         }
 
         function gameLoop() {
@@ -321,37 +344,68 @@
                 obs.update();
                 obs.draw();
 
-                // Eliminar obstáculos que salieron de pantalla
                 if (obs.x + obs.width < 0) {
                     obstacles.splice(i, 1);
-                    i--; // Ajustar índice para no saltarse el siguiente elemento
+                    i--; 
                 }
 
-                // Colisión
                 if (checkCollision(player, obs)) {
                     endGame();
-                    return; // Salir del bucle de juego
+                    return; 
                 }
             }
 
-            // Mostrar puntuación
             ctx.fillStyle = 'white';
             ctx.font = '24px "Press Start 2P", Arial';
             ctx.fillText(`Puntos: ${Math.floor(score / 60)}`, 10, 30);
         }
 
-        // --- Control de Teclas ---
+        // --- Control Táctil (Eventos) ---
+
+        // Función para obtener las coordenadas del toque en relación al canvas
+        function getTouchPos(canvasDom, touchEvent) {
+            const rect = canvasDom.getBoundingClientRect(); // Obtiene el tamaño y posición del canvas
+            return {
+                x: (touchEvent.touches[0].clientX - rect.left) / (rect.right - rect.left) * canvas.width,
+                y: (touchEvent.touches[0].clientY - rect.top) / (rect.bottom - rect.top) * canvas.height
+            };
+        }
+
+        touchControlArea.addEventListener('touchstart', (e) => {
+            e.preventDefault(); // Previene el scroll/zoom del navegador
+            if (gameRunning && e.touches.length > 0) {
+                touchActive = true;
+                const touchPos = getTouchPos(canvas, e);
+                player.update(touchPos.x, touchPos.y); // Mueve el jugador a la posición inicial del toque
+            }
+        }, { passive: false }); // Usar { passive: false } para que preventDefault funcione
+
+        touchControlArea.addEventListener('touchmove', (e) => {
+            e.preventDefault(); // Previene el scroll/zoom del navegador
+            if (gameRunning && touchActive && e.touches.length > 0) {
+                const touchPos = getTouchPos(canvas, e);
+                player.update(touchPos.x, touchPos.y); // Sigue el movimiento del dedo
+            }
+        }, { passive: false });
+
+        touchControlArea.addEventListener('touchend', (e) => {
+            e.preventDefault(); // Previene comportamientos por defecto al soltar
+            touchActive = false;
+        }, { passive: false });
+
+        // --- Manejo del teclado (para desarrollo en PC, no debería interferir en móvil) ---
         let keysPressed = {};
         window.addEventListener('keydown', (e) => {
             keysPressed[e.key] = true;
-            if (gameRunning) {
+            if (gameRunning && !touchActive) { // Solo si el juego corre y no hay un toque activo
                 let dx = 0;
                 let dy = 0;
                 if (keysPressed['ArrowLeft']) dx = -PLAYER_SPEED;
                 if (keysPressed['ArrowRight']) dx = PLAYER_SPEED;
                 if (keysPressed['ArrowUp']) dy = -PLAYER_SPEED;
                 if (keysPressed['ArrowDown']) dy = PLAYER_SPEED;
-                player.update(dx, dy);
+                // Si el jugador se mueve con teclado, calculamos la nueva posición X, Y
+                player.update(player.x + dx, player.y + dy); 
             }
         });
         window.addEventListener('keyup', (e) => {
@@ -360,7 +414,7 @@
 
         // --- Eventos de Botones y Formulario ---
         playerForm.addEventListener('submit', (event) => {
-            event.preventDefault(); // Previene que el formulario se envíe y recargue la página
+            event.preventDefault(); 
 
             if (nombreInput.value.trim() !== '' && telefonoInput.value.trim() !== '') {
                 currentPlayer.name = nombreInput.value.trim();
@@ -378,56 +432,48 @@
         nuevoJugadorButton.addEventListener('click', () => {
             gameOverScreen.style.display = 'none';
             inicioScreen.style.display = 'block';
-            playerForm.reset(); // Limpia los campos del formulario
-            currentPlayer = { name: '', phone: '' }; // Reinicia el jugador actual
+            playerForm.reset(); 
+            currentPlayer = { name: '', phone: '' }; 
         });
 
         salirButton.addEventListener('click', () => {
-            window.close(); // Intenta cerrar la ventana/pestaña
+            window.close(); 
         });
 
         // Evento para el icono de descarga
         downloadIcon.addEventListener('click', downloadRecords);
 
         // --- Lógica de Carga de Imágenes al Inicio ---
-        // Contamos la imagen del jugador (1) + el número de imágenes de meteoritos
         let imagesToLoad = 1 + METEORITE_IMAGE_PATHS.length; 
         let loadedImages = 0;
 
         function imageLoaded() {
             loadedImages++;
             if (loadedImages === imagesToLoad) {
-                // Cuando todas las imágenes han intentado cargar (éxito o error), 
-                // aseguramos el estado inicial de las pantallas.
                 canvas.style.display = 'none';
                 gameOverScreen.style.display = 'none';
-                inicioScreen.style.display = 'block'; // Muestra la pantalla de inicio
+                inicioScreen.style.display = 'block'; 
+                touchControlArea.style.display = 'none'; // Asegurarse de que esté oculto al inicio
             }
         }
 
-        // Cargar imagen del jugador
         playerImage.onload = imageLoaded;
         playerImage.onerror = () => {
             console.error("Error al cargar la imagen del avión. Asegúrate que 'avion.png' esté en la misma carpeta.");
-            // Si la imagen no carga, aún la contamos para no bloquear el inicio del juego.
-            // El juego usará un fallback de color en su lugar.
             imageLoaded(); 
         };
 
-        // Cargar imágenes de meteoritos
         METEORITE_IMAGE_PATHS.forEach(path => {
             let img = new Image();
             img.onload = () => {
-                meteoriteImages.push(img); // Almacena la imagen cargada
+                meteoriteImages.push(img); 
                 imageLoaded();
             };
             img.onerror = () => {
                 console.error("Error al cargar la imagen del meteorito:", path);
-                // Si la imagen no carga, aún la contamos para no bloquear el inicio del juego.
-                // El juego usará un fallback de color en su lugar.
                 imageLoaded(); 
             };
-            img.src = path; // Asigna la ruta local
+            img.src = path; 
         });
 
     </script>
