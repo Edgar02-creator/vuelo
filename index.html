@@ -5,11 +5,125 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Juego de Equipaje en Cabina</title>
   <style>
-    /* Tu CSS existente permanece igual */
+    /* Tu CSS existente aquí o desde tu versión anterior */
+    body {
+      font-family: Arial, sans-serif;
+      background: linear-gradient(to bottom, #d0f0fd, #87cefa);
+      text-align: center;
+      padding: 20px;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    #formulario {
+      background-color: white;
+      padding: 20px;
+      border-radius: 10px;
+      max-width: 400px;
+      margin: auto;
+      box-shadow: 0 0 10px rgba(0,0,0,0.2);
+    }
+
+    #formulario input {
+      margin: 10px auto;
+      padding: 10px;
+      width: 90%;
+      font-size: 16px;
+      border-radius: 5px;
+      border: 1px solid #ccc;
+      display: block;
+    }
+
+    #formulario button {
+      background-color: #007acc;
+      color: white;
+      padding: 10px 20px;
+      font-size: 16px;
+      border-radius: 5px;
+      cursor: pointer;
+      margin-top: 10px;
+    }
+
+    #formulario button:hover {
+      background-color: #005f99;
+    }
+
+    #juego {
+      margin-top: 30px;
+    }
+
+    .item {
+      width: 100px;
+      padding: 10px;
+      border: 2px dashed #333;
+      border-radius: 10px;
+      background-color: white;
+      cursor: grab;
+      display: inline-block;
+      margin: 10px;
+    }
+
+    .item img {
+      width: 64px;
+      height: 64px;
+    }
+
+    .dropzone {
+      width: 200px;
+      height: 180px;
+      border: 3px solid #000;
+      border-radius: 10px;
+      margin: 20px;
+      display: inline-block;
+      vertical-align: top;
+      background-color: white;
+    }
+
+    .dropzone.correct {
+      border-color: green;
+    }
+
+    .dropzone.incorrect {
+      border-color: red;
+    }
+
+    #downloadIcon {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      font-size: 30px;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
-  <!-- Formulario y Juego (idéntico al anterior) -->
+
+  <div id="formulario">
+    <h2>📋 Ingrese sus datos para comenzar</h2>
+    <input type="text" id="nombre" placeholder="Nombres y apellidos" />
+    <input type="tel" id="telefono" placeholder="Número de teléfono" />
+    <button onclick="iniciarJuego()">Iniciar juego</button>
+  </div>
+
+  <div id="juego" class="hidden">
+    <h1>¿Qué objetos puedes llevar en cabina?</h1>
+    <div id="bienvenida"></div>
+    <div id="score">Puntaje: 0 | 🏆 Récord: 0</div>
+    <div id="items"></div>
+
+    <div id="zones">
+      <div class="dropzone" id="permitido" ondragover="allowDrop(event)" ondrop="drop(event, 'permitido')">
+        <h3>✅ Permitido</h3>
+      </div>
+      <div class="dropzone" id="prohibido" ondragover="allowDrop(event)" ondrop="drop(event, 'prohibido')">
+        <h3>❌ Prohibido</h3>
+      </div>
+    </div>
+  </div>
+
+  <div id="downloadIcon" title="Descargar Registros">💾</div>
 
   <script>
     const objetos = [
@@ -45,14 +159,14 @@
     }
 
     function guardarRegistro(nombre, telefono) {
-      const timestamp = new Date().toLocaleString();
+      const fechaHora = new Date().toLocaleString();
 
       fetch("https://script.google.com/macros/s/AKfycbzGbRJZgPlOGlWvSkkqTDOE-FO7Xk7CXzVWPgNz6GuOm7rRXItfaOXc9zM0Wud_bXEF9Q/exec", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ nombre, telefono, fechaHora: timestamp })
+        body: JSON.stringify({ nombre, telefono, fechaHora })
       })
       .then(response => response.text())
       .then(text => {
@@ -64,8 +178,106 @@
       });
     }
 
-    // Resto del código (crearItems, allowDrop, drop, actualizarMarcador, descargarRegistros) permanece igual.
+    function crearItems() {
+      const contenedor = document.getElementById("items");
+      contenedor.innerHTML = "";
 
+      objetos.forEach((obj, i) => {
+        const div = document.createElement("div");
+        div.className = "item";
+        div.id = "obj" + i;
+        div.draggable = true;
+        div.dataset.permitido = obj.permitido;
+
+        const img = document.createElement("img");
+        img.src = obj.url;
+        img.alt = obj.nombre;
+
+        const texto = document.createElement("span");
+        texto.textContent = obj.nombre;
+
+        div.appendChild(img);
+        div.appendChild(texto);
+
+        div.ondragstart = (e) => {
+          e.dataTransfer.setData("text", div.id);
+        };
+
+        contenedor.appendChild(div);
+      });
+    }
+
+    function allowDrop(ev) {
+      ev.preventDefault();
+    }
+
+    function drop(ev, zona) {
+      ev.preventDefault();
+      const data = ev.dataTransfer.getData("text");
+      const elemento = document.getElementById(data);
+      if (!elemento) return;
+
+      const esPermitido = elemento.dataset.permitido === "true";
+      const zonaCorrecta = (zona === "permitido" && esPermitido) || (zona === "prohibido" && !esPermitido);
+      const zonaDiv = document.getElementById(zona);
+
+      zonaDiv.classList.remove("correct", "incorrect");
+
+      if (zonaCorrecta) {
+        zonaDiv.classList.add("correct");
+        puntaje += 10;
+      } else {
+        zonaDiv.classList.add("incorrect");
+        puntaje -= 5;
+      }
+
+      if (puntaje > record) {
+        record = puntaje;
+        localStorage.setItem("record", record);
+      }
+
+      actualizarMarcador();
+      elemento.remove();
+
+      if (document.getElementById("items").children.length === 0) {
+        setTimeout(() => {
+          alert("Juego finalizado. Puntaje: " + puntaje);
+          puntaje = 0;
+          document.getElementById("juego").classList.add("hidden");
+          document.getElementById("formulario").classList.remove("hidden");
+          document.getElementById("nombre").value = "";
+          document.getElementById("telefono").value = "";
+          actualizarMarcador();
+        }, 400);
+      }
+    }
+
+    function actualizarMarcador() {
+      document.getElementById("score").textContent = `Puntaje: ${puntaje} | 🏆 Récord: ${record}`;
+    }
+
+    function descargarRegistros() {
+      const registros = JSON.parse(localStorage.getItem("registros_usuarios")) || [];
+      if (registros.length === 0) {
+        alert("No hay registros aún.");
+        return;
+      }
+
+      let csv = "Nombre,Teléfono,Fecha y hora\n";
+      registros.forEach(reg => {
+        csv += `"${reg.nombre}","${reg.telefono}","${reg.timestamp}"\n`;
+      });
+
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.setAttribute("download", "registros_jugadores.csv");
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+    document.getElementById("downloadIcon").addEventListener("click", descargarRegistros);
   </script>
 </body>
 </html>
